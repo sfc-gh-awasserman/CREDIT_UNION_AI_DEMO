@@ -53,44 +53,12 @@ WITH member_base AS (
         END AS LAST_NAME,
         DATEADD(day, -UNIFORM(90, 10950, RANDOM()), CURRENT_DATE()) AS JOIN_DATE, -- Last 30 years, weighted recent
         DATEADD(year, -UNIFORM(25, 75, RANDOM()), CURRENT_DATE()) AS DATE_OF_BIRTH,
-        -- Branch distribution (Encinitas gets 25% for drill-down questions)
-        CASE UNIFORM(1, 100, RANDOM())
-            WHEN 1 TO 25 THEN 'BR001' -- Encinitas 25%
-            WHEN 26 TO 40 THEN 'BR002' -- Carlsbad 15%
-            WHEN 41 TO 55 THEN 'BR003' -- San Diego 15%
-            WHEN 56 TO 68 THEN 'BR004' -- Oceanside 13%
-            WHEN 69 TO 78 THEN 'BR007' -- Online 10%
-            WHEN 79 TO 88 THEN 'BR006' -- Escondido 10%
-            WHEN 89 TO 95 THEN 'BR005' -- Vista 7%
-            ELSE 'BR008' -- Temecula 5%
-        END AS PRIMARY_BRANCH_ID,
-        -- Member status (95% active)
-        CASE UNIFORM(1, 100, RANDOM())
-            WHEN 1 TO 95 THEN 'Active'
-            WHEN 96 TO 98 THEN 'Inactive'
-            ELSE 'Dormant'
-        END AS MEMBER_STATUS,
+        UNIFORM(1, 100, RANDOM()) AS BRANCH_RAND,
+        UNIFORM(1, 100, RANDOM()) AS STATUS_RAND,
         UNIFORM(45000, 250000, RANDOM()) AS ANNUAL_INCOME,
-        -- Marketing channel distribution
-        CASE UNIFORM(1, 100, RANDOM())
-            WHEN 1 TO 30 THEN 'Referral'
-            WHEN 31 TO 50 THEN 'Online'
-            WHEN 51 TO 65 THEN 'Branch Walk-in'
-            WHEN 66 TO 80 THEN 'Social Media'
-            WHEN 81 TO 90 THEN 'Email Campaign'
-            ELSE 'Direct Mail'
-        END AS MARKETING_CHANNEL,
-        CASE UNIFORM(1, 10, RANDOM())
-            WHEN 1 TO 8 THEN 'Low'
-            WHEN 9 TO 10 THEN 'Medium'
-            ELSE 'High'
-        END AS RISK_RATING,
-        CASE UNIFORM(1, 10, RANDOM())
-            WHEN 1 TO 6 THEN 'Employed Full-time'
-            WHEN 7 TO 8 THEN 'Self-employed'
-            WHEN 9 THEN 'Retired'
-            ELSE 'Part-time'
-        END AS EMPLOYMENT_STATUS
+        UNIFORM(1, 100, RANDOM()) AS CHANNEL_RAND,
+        UNIFORM(1, 10, RANDOM()) AS RISK_RAND,
+        UNIFORM(1, 10, RANDOM()) AS EMPLOYMENT_RAND
     FROM TABLE(GENERATOR(ROWCOUNT => 5000))
 )
 SELECT 
@@ -102,8 +70,23 @@ SELECT
     '(' || UNIFORM(200, 999, RANDOM()) || ') ' || UNIFORM(200, 999, RANDOM()) || '-' || LPAD(UNIFORM(0, 9999, RANDOM()), 4, '0') AS PHONE,
     DATE_OF_BIRTH,
     JOIN_DATE,
-    PRIMARY_BRANCH_ID,
-    MEMBER_STATUS,
+    -- Branch distribution (Encinitas gets 25% for drill-down questions)
+    CASE 
+        WHEN BRANCH_RAND BETWEEN 1 AND 25 THEN 'BR001' -- Encinitas 25%
+        WHEN BRANCH_RAND BETWEEN 26 AND 40 THEN 'BR002' -- Carlsbad 15%
+        WHEN BRANCH_RAND BETWEEN 41 AND 55 THEN 'BR003' -- San Diego 15%
+        WHEN BRANCH_RAND BETWEEN 56 AND 68 THEN 'BR004' -- Oceanside 13%
+        WHEN BRANCH_RAND BETWEEN 69 AND 78 THEN 'BR007' -- Online 10%
+        WHEN BRANCH_RAND BETWEEN 79 AND 88 THEN 'BR006' -- Escondido 10%
+        WHEN BRANCH_RAND BETWEEN 89 AND 95 THEN 'BR005' -- Vista 7%
+        ELSE 'BR008' -- Temecula 5%
+    END AS PRIMARY_BRANCH_ID,
+    -- Member status (95% active)
+    CASE 
+        WHEN STATUS_RAND BETWEEN 1 AND 95 THEN 'Active'
+        WHEN STATUS_RAND BETWEEN 96 AND 98 THEN 'Inactive'
+        ELSE 'Dormant'
+    END AS MEMBER_STATUS,
     -- Member segment based on tenure
     CASE 
         WHEN DATEDIFF(month, JOIN_DATE, CURRENT_DATE()) < 12 THEN 'New'
@@ -111,32 +94,51 @@ SELECT
         WHEN DATEDIFF(month, JOIN_DATE, CURRENT_DATE()) > 60 AND ANNUAL_INCOME > 150000 THEN 'Premium'
         ELSE 'Loyal'
     END AS MEMBER_SEGMENT,
-    RISK_RATING,
+    -- Risk rating
+    CASE 
+        WHEN RISK_RAND BETWEEN 1 AND 8 THEN 'Low'
+        WHEN RISK_RAND BETWEEN 9 AND 10 THEN 'Medium'
+        ELSE 'High'
+    END AS RISK_RATING,
     UNIFORM(100, 9999, RANDOM()) || ' Main St' AS ADDRESS,
-    CASE PRIMARY_BRANCH_ID
-        WHEN 'BR001' THEN 'Encinitas'
-        WHEN 'BR002' THEN 'Carlsbad'
-        WHEN 'BR003' THEN 'San Diego'
-        WHEN 'BR004' THEN 'Oceanside'
-        WHEN 'BR005' THEN 'Vista'
-        WHEN 'BR006' THEN 'Escondido'
-        WHEN 'BR007' THEN 'San Diego'
+    CASE 
+        WHEN BRANCH_RAND BETWEEN 1 AND 25 THEN 'Encinitas'
+        WHEN BRANCH_RAND BETWEEN 26 AND 40 THEN 'Carlsbad'
+        WHEN BRANCH_RAND BETWEEN 41 AND 55 THEN 'San Diego'
+        WHEN BRANCH_RAND BETWEEN 56 AND 68 THEN 'Oceanside'
+        WHEN BRANCH_RAND BETWEEN 89 AND 95 THEN 'Vista'
+        WHEN BRANCH_RAND BETWEEN 79 AND 88 THEN 'Escondido'
+        WHEN BRANCH_RAND BETWEEN 69 AND 78 THEN 'San Diego'
         ELSE 'Temecula'
     END AS CITY,
     'CA' AS STATE,
-    CASE PRIMARY_BRANCH_ID
-        WHEN 'BR001' THEN '92024'
-        WHEN 'BR002' THEN '92008'
-        WHEN 'BR003' THEN '92101'
-        WHEN 'BR004' THEN '92054'
-        WHEN 'BR005' THEN '92083'
-        WHEN 'BR006' THEN '92025'
-        WHEN 'BR007' THEN '92101'
+    CASE 
+        WHEN BRANCH_RAND BETWEEN 1 AND 25 THEN '92024'
+        WHEN BRANCH_RAND BETWEEN 26 AND 40 THEN '92008'
+        WHEN BRANCH_RAND BETWEEN 41 AND 55 THEN '92101'
+        WHEN BRANCH_RAND BETWEEN 56 AND 68 THEN '92054'
+        WHEN BRANCH_RAND BETWEEN 89 AND 95 THEN '92083'
+        WHEN BRANCH_RAND BETWEEN 79 AND 88 THEN '92025'
+        WHEN BRANCH_RAND BETWEEN 69 AND 78 THEN '92101'
         ELSE '92590'
     END AS ZIP_CODE,
-    EMPLOYMENT_STATUS,
+    -- Employment status
+    CASE 
+        WHEN EMPLOYMENT_RAND BETWEEN 1 AND 6 THEN 'Employed Full-time'
+        WHEN EMPLOYMENT_RAND BETWEEN 7 AND 8 THEN 'Self-employed'
+        WHEN EMPLOYMENT_RAND = 9 THEN 'Retired'
+        ELSE 'Part-time'
+    END AS EMPLOYMENT_STATUS,
     ANNUAL_INCOME,
-    MARKETING_CHANNEL
+    -- Marketing channel distribution
+    CASE 
+        WHEN CHANNEL_RAND BETWEEN 1 AND 30 THEN 'Referral'
+        WHEN CHANNEL_RAND BETWEEN 31 AND 50 THEN 'Online'
+        WHEN CHANNEL_RAND BETWEEN 51 AND 65 THEN 'Branch Walk-in'
+        WHEN CHANNEL_RAND BETWEEN 66 AND 80 THEN 'Social Media'
+        WHEN CHANNEL_RAND BETWEEN 81 AND 90 THEN 'Email Campaign'
+        ELSE 'Direct Mail'
+    END AS MARKETING_CHANNEL
 FROM member_base;
 
 -- =====================================================================
@@ -679,6 +681,7 @@ WITH interactions AS (
             WHEN 4 THEN 'Branch'
             ELSE 'Mobile App'
         END AS INTERACTION_CHANNEL,
+        UNIFORM(1, 10, RANDOM()) AS RESOLUTION_RAND,
         ROW_NUMBER() OVER (ORDER BY M.MEMBER_ID) AS ROW_NUM
     FROM MEMBERS M
     WHERE UNIFORM(1, 100, RANDOM()) <= 25
@@ -712,9 +715,9 @@ SELECT
     END AS INTERACTION_TOPIC,
     CASE 
         WHEN INTERACTION_TYPE = 'Complaint' THEN 
-            CASE UNIFORM(1, 10, RANDOM())
-                WHEN 1 TO 7 THEN 'Resolved'
-                WHEN 8 TO 9 THEN 'Pending'
+            CASE 
+                WHEN RESOLUTION_RAND BETWEEN 1 AND 7 THEN 'Resolved'
+                WHEN RESOLUTION_RAND BETWEEN 8 AND 9 THEN 'Pending'
                 ELSE 'Escalated'
             END
         ELSE 'Resolved'

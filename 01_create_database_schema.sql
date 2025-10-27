@@ -246,40 +246,13 @@ CREATE OR REPLACE TABLE MEMBER_INTERACTIONS (
 );
 
 -- =====================================================================
--- Create indexes for better query performance
+-- NOTE: Snowflake uses automatic micro-partitioning for performance
+-- Traditional indexes are not needed or supported in Snowflake
+-- Query performance is optimized through:
+--   - Automatic clustering on table data
+--   - Pruning based on query predicates
+--   - Result caching
 -- =====================================================================
-
--- Member indexes
-CREATE INDEX idx_members_join_date ON MEMBERS(JOIN_DATE);
-CREATE INDEX idx_members_branch ON MEMBERS(PRIMARY_BRANCH_ID);
-CREATE INDEX idx_members_segment ON MEMBERS(MEMBER_SEGMENT);
-CREATE INDEX idx_members_status ON MEMBERS(MEMBER_STATUS);
-
--- Account indexes
-CREATE INDEX idx_accounts_member ON ACCOUNTS(MEMBER_ID);
-CREATE INDEX idx_accounts_type ON ACCOUNTS(ACCOUNT_TYPE);
-CREATE INDEX idx_accounts_maturity ON ACCOUNTS(MATURITY_DATE);
-CREATE INDEX idx_accounts_branch ON ACCOUNTS(BRANCH_ID);
-
--- Loan indexes
-CREATE INDEX idx_loans_member ON LOANS(MEMBER_ID);
-CREATE INDEX idx_loans_type ON LOANS(LOAN_TYPE);
-CREATE INDEX idx_loans_status ON LOANS(LOAN_STATUS);
-CREATE INDEX idx_loans_origination ON LOANS(ORIGINATION_DATE);
-CREATE INDEX idx_loans_branch ON LOANS(BRANCH_ID);
-
--- Transaction indexes
-CREATE INDEX idx_transactions_account ON TRANSACTIONS(ACCOUNT_ID);
-CREATE INDEX idx_transactions_member ON TRANSACTIONS(MEMBER_ID);
-CREATE INDEX idx_transactions_date ON TRANSACTIONS(TRANSACTION_DATE);
-
--- Loan payment indexes
-CREATE INDEX idx_loan_payments_loan ON LOAN_PAYMENTS(LOAN_ID);
-CREATE INDEX idx_loan_payments_date ON LOAN_PAYMENTS(PAYMENT_DATE);
-
--- Credit score indexes
-CREATE INDEX idx_credit_scores_member ON CREDIT_SCORE_HISTORY(MEMBER_ID);
-CREATE INDEX idx_credit_scores_date ON CREDIT_SCORE_HISTORY(SCORE_DATE);
 
 -- =====================================================================
 -- Verification queries

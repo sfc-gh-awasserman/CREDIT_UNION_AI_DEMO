@@ -102,7 +102,7 @@ CREATE OR REPLACE TABLE LOANS (
     LOAN_STATUS VARCHAR(20), -- Active, Paid Off, Charged Off, Delinquent, Suspended
     ORIGINATION_DATE DATE NOT NULL,
     CLOSE_DATE DATE,
-    ORIGINAL_LOAN_AMOUNT DECIMAL(15,2) NOT NULL,
+    ORIGINAL_LOAN_AMOUNT DECIMAL(15,2), -- NULL for credit cards (they have credit limits instead)
     CURRENT_BALANCE DECIMAL(15,2) NOT NULL,
     INTEREST_RATE DECIMAL(6,4) NOT NULL,
     TERM_MONTHS INT, -- Loan term in months

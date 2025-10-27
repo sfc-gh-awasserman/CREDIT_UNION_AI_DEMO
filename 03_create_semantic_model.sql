@@ -587,10 +587,6 @@ CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
       description: Total personal loan portfolio balance
       expr: SUM(CASE WHEN loans.LOAN_TYPE = 'Personal' AND loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END)
       
-    - name: AUTO_LOAN_PCT_OF_PORTFOLIO
-      description: Auto loans as percentage of total loan portfolio
-      expr: ROUND((SUM(CASE WHEN loans.LOAN_TYPE = 'Auto' AND loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END) * 100.0 / NULLIF(SUM(CASE WHEN loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE END), 0)), 2)
-      
     # Credit Card Health Metrics
     - name: AVG_CREDIT_UTILIZATION
       description: Average credit card utilization percentage
@@ -633,34 +629,26 @@ CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
       description: Number of loans 90+ days delinquent
       expr: COUNT(DISTINCT CASE WHEN loans.DAYS_DELINQUENT >= 90 THEN loans.LOAN_ID END)
       
-    - name: DELINQUENCY_RATE
-      description: Percentage of active loans that are delinquent
-      expr: ROUND((COUNT(DISTINCT CASE WHEN loans.LOAN_STATUS = 'Active' AND loans.DAYS_DELINQUENT >= 30 THEN loans.LOAN_ID END) * 100.0 / NULLIF(COUNT(DISTINCT CASE WHEN loans.LOAN_STATUS = 'Active' THEN loans.LOAN_ID END), 0)), 2)
-      
     # Marketing Metrics
     - name: TOTAL_MARKETING_SPEND
       description: Total marketing campaign spend
       expr: SUM(marketing_campaigns.ACTUAL_SPEND)
       
-    - name: TOTAL_MARKETING_BUDGET
-      description: Total marketing campaign budget
-      expr: SUM(marketing_campaigns.BUDGET)
-      
     - name: CAMPAIGN_REVENUE
       description: Total revenue generated from campaigns
       expr: SUM(member_campaign_responses.REVENUE_GENERATED)
       
-    - name: ROAS
-      description: Return on ad spend (Revenue / Spend)
-      expr: ROUND(SUM(member_campaign_responses.REVENUE_GENERATED) / NULLIF(SUM(marketing_campaigns.ACTUAL_SPEND), 0), 2)
+    - name: CAMPAIGN_CONVERSIONS
+      description: Number of campaign conversions
+      expr: COUNT(CASE WHEN member_campaign_responses.RESPONSE_TYPE = 'Conversion' THEN 1 END)
       
-    - name: CAMPAIGN_CONVERSION_RATE
-      description: Percentage of campaign responses that converted
-      expr: ROUND((COUNT(CASE WHEN member_campaign_responses.RESPONSE_TYPE = 'Conversion' THEN 1 END) * 100.0 / NULLIF(COUNT(member_campaign_responses.RESPONSE_ID), 0)), 2)
+    - name: CAMPAIGN_APPLICATIONS
+      description: Number of campaign applications
+      expr: COUNT(CASE WHEN member_campaign_responses.RESPONSE_TYPE IN ('Application', 'Conversion') THEN 1 END)
       
-    - name: CAMPAIGN_APPLICATION_RATE
-      description: Percentage of responses that resulted in applications
-      expr: ROUND((COUNT(CASE WHEN member_campaign_responses.RESPONSE_TYPE IN ('Application', 'Conversion') THEN 1 END) * 100.0 / NULLIF(COUNT(member_campaign_responses.RESPONSE_ID), 0)), 2)
+    - name: TOTAL_CAMPAIGN_RESPONSES
+      description: Total number of campaign responses
+      expr: COUNT(member_campaign_responses.RESPONSE_ID)
       
     # Member Satisfaction Metrics
     - name: AVG_SATISFACTION_RATING
@@ -679,22 +667,18 @@ CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
       description: Number of resolved interactions
       expr: COUNT(CASE WHEN member_interactions.RESOLUTION_STATUS = 'Resolved' THEN 1 END)
       
-    - name: RESOLUTION_RATE
-      description: Percentage of interactions that are resolved
-      expr: ROUND((COUNT(CASE WHEN member_interactions.RESOLUTION_STATUS = 'Resolved' THEN 1 END) * 100.0 / NULLIF(COUNT(member_interactions.INTERACTION_ID), 0)), 2)
+    - name: RESOLVED_RATE_NUMERATOR
+      description: Count of resolved interactions (for calculating resolution rate)
+      expr: COUNT(CASE WHEN member_interactions.RESOLUTION_STATUS = 'Resolved' THEN 1 END)
       
-    # Branch Performance Metrics
-    - name: AVG_DEPOSIT_PER_MEMBER
-      description: Average deposit balance per member
-      expr: SUM(accounts.CURRENT_BALANCE) / NULLIF(COUNT(DISTINCT members.MEMBER_ID), 0)
+    # Branch Performance Metrics - using simple sums and counts
+    - name: TOTAL_ACCOUNT_COUNT
+      description: Total number of accounts
+      expr: COUNT(DISTINCT accounts.ACCOUNT_ID)
       
-    - name: AVG_LOAN_PER_MEMBER
-      description: Average loan balance per member
-      expr: SUM(CASE WHEN loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END) / NULLIF(COUNT(DISTINCT members.MEMBER_ID), 0)
-      
-    - name: PRODUCTS_PER_MEMBER
-      description: Average number of products per member
-      expr: (COUNT(DISTINCT accounts.ACCOUNT_ID) + COUNT(DISTINCT loans.LOAN_ID)) / NULLIF(COUNT(DISTINCT members.MEMBER_ID), 0)
+    - name: TOTAL_LOAN_COUNT
+      description: Total number of loans
+      expr: COUNT(DISTINCT loans.LOAN_ID)
   $$
 );
 

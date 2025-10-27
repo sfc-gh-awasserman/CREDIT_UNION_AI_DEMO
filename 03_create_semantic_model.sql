@@ -1,735 +1,707 @@
 -- =====================================================================
 -- Snowflake Intelligence Demo: Credit Union
 -- File: 03_create_semantic_model.sql
--- Purpose: Create semantic views for Snowflake Intelligence agent
+-- Purpose: Create Semantic Model using YAML Configuration
 -- =====================================================================
 
 USE DATABASE CREDIT_UNION_DEMO;
 USE SCHEMA CREDIT_UNION_DATA;
 
--- =====================================================================
--- SEMANTIC VIEW 1: MEMBER_ACQUISITION_VIEW
--- Purpose: Track new member acquisition trends and effectiveness
--- Key Questions: 
---   - How many new members in a period?
---   - Which channels are most effective?
---   - Which branches are growing?
--- =====================================================================
-CREATE OR REPLACE VIEW MEMBER_ACQUISITION_VIEW
-COMMENT = 'Member acquisition metrics with time dimensions and channel attribution'
-AS
-SELECT 
-    -- Member identifiers
-    M.MEMBER_ID,
-    M.MEMBER_NUMBER,
-    M.FIRST_NAME || ' ' || M.LAST_NAME AS MEMBER_NAME,
-    
-    -- Acquisition details
-    M.JOIN_DATE,
-    YEAR(M.JOIN_DATE) AS JOIN_YEAR,
-    QUARTER(M.JOIN_DATE) AS JOIN_QUARTER,
-    MONTH(M.JOIN_DATE) AS JOIN_MONTH,
-    MONTHNAME(M.JOIN_DATE) AS JOIN_MONTH_NAME,
-    DAYOFWEEK(M.JOIN_DATE) AS JOIN_DAY_OF_WEEK,
-    DAYNAME(M.JOIN_DATE) AS JOIN_DAY_NAME,
-    DATE_TRUNC('MONTH', M.JOIN_DATE) AS JOIN_MONTH_START,
-    DATE_TRUNC('QUARTER', M.JOIN_DATE) AS JOIN_QUARTER_START,
-    DATE_TRUNC('YEAR', M.JOIN_DATE) AS JOIN_YEAR_START,
-    
-    -- Time intelligence
-    DATEDIFF(day, M.JOIN_DATE, CURRENT_DATE()) AS DAYS_AS_MEMBER,
-    DATEDIFF(month, M.JOIN_DATE, CURRENT_DATE()) AS MONTHS_AS_MEMBER,
-    DATEDIFF(year, M.JOIN_DATE, CURRENT_DATE()) AS YEARS_AS_MEMBER,
-    
-    -- Member attributes
-    M.MEMBER_STATUS,
-    M.MEMBER_SEGMENT,
-    M.RISK_RATING,
-    M.MARKETING_CHANNEL,
-    M.EMPLOYMENT_STATUS,
-    M.ANNUAL_INCOME,
-    
-    -- Branch information
-    M.PRIMARY_BRANCH_ID,
-    B.BRANCH_NAME,
-    B.BRANCH_CODE,
-    B.CITY AS BRANCH_CITY,
-    B.STATE AS BRANCH_STATE,
-    B.REGION AS BRANCH_REGION,
-    B.BRANCH_TYPE,
-    
-    -- Demographics
-    M.DATE_OF_BIRTH,
-    DATEDIFF(year, M.DATE_OF_BIRTH, M.JOIN_DATE) AS AGE_AT_JOIN,
-    DATEDIFF(year, M.DATE_OF_BIRTH, CURRENT_DATE()) AS CURRENT_AGE,
-    M.CITY AS MEMBER_CITY,
-    M.STATE AS MEMBER_STATE,
-    M.ZIP_CODE AS MEMBER_ZIP,
-    
-    -- Relationship depth (calculated from other tables)
-    (SELECT COUNT(DISTINCT ACCOUNT_ID) FROM ACCOUNTS WHERE MEMBER_ID = M.MEMBER_ID) AS TOTAL_ACCOUNTS,
-    (SELECT COUNT(DISTINCT LOAN_ID) FROM LOANS WHERE MEMBER_ID = M.MEMBER_ID) AS TOTAL_LOANS,
-    (SELECT SUM(CURRENT_BALANCE) FROM ACCOUNTS WHERE MEMBER_ID = M.MEMBER_ID) AS TOTAL_DEPOSIT_BALANCE,
-    (SELECT SUM(CURRENT_BALANCE) FROM LOANS WHERE MEMBER_ID = M.MEMBER_ID AND LOAN_STATUS = 'Active') AS TOTAL_LOAN_BALANCE,
-    
-    -- Flags for analysis
-    CASE WHEN DATEDIFF(month, M.JOIN_DATE, CURRENT_DATE()) <= 3 THEN 1 ELSE 0 END AS IS_NEW_MEMBER_90_DAYS,
-    CASE WHEN DATEDIFF(month, M.JOIN_DATE, CURRENT_DATE()) <= 6 THEN 1 ELSE 0 END AS IS_NEW_MEMBER_6_MONTHS,
-    CASE WHEN DATEDIFF(month, M.JOIN_DATE, CURRENT_DATE()) <= 12 THEN 1 ELSE 0 END AS IS_NEW_MEMBER_12_MONTHS,
-    CASE WHEN M.MARKETING_CHANNEL = 'Referral' THEN 1 ELSE 0 END AS IS_REFERRAL,
-    CASE WHEN M.MARKETING_CHANNEL IN ('Online', 'Social Media', 'Email Campaign') THEN 1 ELSE 0 END AS IS_DIGITAL_CHANNEL,
-    
-    -- Timestamps
-    M.CREATED_AT,
-    M.UPDATED_AT
-FROM MEMBERS M
-LEFT JOIN BRANCHES B ON M.PRIMARY_BRANCH_ID = B.BRANCH_ID;
+-- Create the semantic model using YAML configuration
+CALL SYSTEM$CREATE_SEMANTIC_VIEW_FROM_YAML(
+  'CREDIT_UNION_DEMO.CREDIT_UNION_DATA',
+  $$
+  name: CREDIT_UNION_ANALYTICS
+  description: Comprehensive semantic model for credit union operations covering member acquisition, certificate renewals, loan portfolio health, branch performance, and marketing effectiveness
+  tables:
+    - name: BRANCHES
+      description: Credit union branch locations and details
+      base_table:
+        database: CREDIT_UNION_DEMO
+        schema: CREDIT_UNION_DATA
+        table: BRANCHES
+      primary_key:
+        columns:
+          - BRANCH_ID
+      dimensions:
+        - name: BRANCH_ID
+          description: Unique identifier for the branch
+          expr: branches.BRANCH_ID
+          data_type: VARCHAR
+        - name: BRANCH_NAME
+          description: Name of the branch (e.g., Encinitas Main Branch)
+          expr: branches.BRANCH_NAME
+          data_type: VARCHAR
+        - name: BRANCH_CODE
+          description: Short code for the branch (e.g., ENC)
+          expr: branches.BRANCH_CODE
+          data_type: VARCHAR
+        - name: BRANCH_CITY
+          description: City where the branch is located
+          expr: branches.CITY
+          data_type: VARCHAR
+        - name: BRANCH_STATE
+          description: State where the branch is located
+          expr: branches.STATE
+          data_type: VARCHAR
+        - name: BRANCH_REGION
+          description: Geographic region of the branch
+          expr: branches.REGION
+          data_type: VARCHAR
+        - name: BRANCH_TYPE
+          description: Type of branch (Full Service, Limited Service, Online Only)
+          expr: branches.BRANCH_TYPE
+          data_type: VARCHAR
+        - name: BRANCH_MANAGER
+          description: Name of the branch manager
+          expr: branches.MANAGER_NAME
+          data_type: VARCHAR
+        - name: BRANCH_OPEN_DATE
+          description: Date when the branch opened
+          expr: branches.OPEN_DATE
+          data_type: DATE
 
--- =====================================================================
--- SEMANTIC VIEW 2: CERTIFICATE_RENEWAL_VIEW
--- Purpose: Track certificate (CD) maturities and renewal opportunities
--- Key Questions:
---   - How many certificates are maturing soon?
---   - Which branches have the most renewals?
---   - What is the total value of maturing CDs?
--- =====================================================================
-CREATE OR REPLACE VIEW CERTIFICATE_RENEWAL_VIEW
-COMMENT = 'Certificate of deposit maturity tracking and renewal analysis'
-AS
-SELECT 
-    -- Account identifiers
-    A.ACCOUNT_ID,
-    A.ACCOUNT_NUMBER,
-    
-    -- Member information
-    A.MEMBER_ID,
-    M.MEMBER_NUMBER,
-    M.FIRST_NAME || ' ' || M.LAST_NAME AS MEMBER_NAME,
-    M.EMAIL AS MEMBER_EMAIL,
-    M.PHONE AS MEMBER_PHONE,
-    M.MEMBER_SEGMENT,
-    M.MEMBER_STATUS,
-    
-    -- Branch information
-    A.BRANCH_ID,
-    B.BRANCH_NAME,
-    B.BRANCH_CODE,
-    B.CITY AS BRANCH_CITY,
-    B.STATE AS BRANCH_STATE,
-    B.REGION AS BRANCH_REGION,
-    B.MANAGER_NAME AS BRANCH_MANAGER,
-    
-    -- Certificate details
-    A.OPEN_DATE AS CERTIFICATE_OPEN_DATE,
-    A.MATURITY_DATE,
-    A.CERTIFICATE_TERM_MONTHS,
-    A.ORIGINAL_DEPOSIT_AMOUNT,
-    A.CURRENT_BALANCE,
-    A.INTEREST_RATE,
-    A.RENEWAL_STATUS,
-    A.ACCOUNT_STATUS,
-    
-    -- Time calculations
-    DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) AS DAYS_UNTIL_MATURITY,
-    DATEDIFF(month, CURRENT_DATE(), A.MATURITY_DATE) AS MONTHS_UNTIL_MATURITY,
-    DATEDIFF(day, A.OPEN_DATE, A.MATURITY_DATE) AS TOTAL_TERM_DAYS,
-    DATEDIFF(day, A.OPEN_DATE, CURRENT_DATE()) AS DAYS_SINCE_OPEN,
-    
-    -- Maturity date dimensions
-    YEAR(A.MATURITY_DATE) AS MATURITY_YEAR,
-    QUARTER(A.MATURITY_DATE) AS MATURITY_QUARTER,
-    MONTH(A.MATURITY_DATE) AS MATURITY_MONTH,
-    MONTHNAME(A.MATURITY_DATE) AS MATURITY_MONTH_NAME,
-    DATE_TRUNC('MONTH', A.MATURITY_DATE) AS MATURITY_MONTH_START,
-    DATE_TRUNC('QUARTER', A.MATURITY_DATE) AS MATURITY_QUARTER_START,
-    
-    -- Interest earned calculation
-    A.CURRENT_BALANCE - A.ORIGINAL_DEPOSIT_AMOUNT AS INTEREST_EARNED_TO_DATE,
-    
-    -- Renewal urgency flags
-    CASE 
-        WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) <= 30 THEN 'Immediate (30 days)'
-        WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) <= 60 THEN 'Soon (60 days)'
-        WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) <= 90 THEN 'Upcoming (90 days)'
-        WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) <= 180 THEN 'Future (6 months)'
-        WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) > 180 THEN 'Distant (6+ months)'
-        ELSE 'Matured'
-    END AS RENEWAL_URGENCY,
-    
-    CASE WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) BETWEEN 0 AND 30 THEN 1 ELSE 0 END AS IS_MATURING_30_DAYS,
-    CASE WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) BETWEEN 0 AND 60 THEN 1 ELSE 0 END AS IS_MATURING_60_DAYS,
-    CASE WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) BETWEEN 0 AND 90 THEN 1 ELSE 0 END AS IS_MATURING_90_DAYS,
-    CASE WHEN DATEDIFF(day, CURRENT_DATE(), A.MATURITY_DATE) BETWEEN 0 AND 180 THEN 1 ELSE 0 END AS IS_MATURING_6_MONTHS,
-    CASE WHEN A.MATURITY_DATE < CURRENT_DATE() THEN 1 ELSE 0 END AS IS_MATURED,
-    CASE WHEN A.RENEWAL_STATUS = 'Auto-Renew' THEN 1 ELSE 0 END AS IS_AUTO_RENEW,
-    
-    -- Value tiers
-    CASE 
-        WHEN A.CURRENT_BALANCE >= 100000 THEN 'Premium ($100K+)'
-        WHEN A.CURRENT_BALANCE >= 50000 THEN 'High Value ($50K-$100K)'
-        WHEN A.CURRENT_BALANCE >= 25000 THEN 'Mid Value ($25K-$50K)'
-        WHEN A.CURRENT_BALANCE >= 10000 THEN 'Standard ($10K-$25K)'
-        ELSE 'Entry Level (<$10K)'
-    END AS CERTIFICATE_VALUE_TIER,
-    
-    -- Timestamps
-    A.CREATED_AT,
-    A.UPDATED_AT
-FROM ACCOUNTS A
-INNER JOIN MEMBERS M ON A.MEMBER_ID = M.MEMBER_ID
-INNER JOIN BRANCHES B ON A.BRANCH_ID = B.BRANCH_ID
-WHERE A.ACCOUNT_TYPE = 'Certificate'
-    AND A.ACCOUNT_STATUS = 'Active';
+    - name: MEMBERS
+      description: Credit union members with demographics and relationship information
+      base_table:
+        database: CREDIT_UNION_DEMO
+        schema: CREDIT_UNION_DATA
+        table: MEMBERS
+      primary_key:
+        columns:
+          - MEMBER_ID
+      dimensions:
+        - name: MEMBER_ID
+          description: Unique identifier for the member
+          expr: members.MEMBER_ID
+          data_type: VARCHAR
+        - name: MEMBER_NUMBER
+          description: Member account number
+          expr: members.MEMBER_NUMBER
+          data_type: VARCHAR
+        - name: MEMBER_FIRST_NAME
+          description: Member's first name
+          expr: members.FIRST_NAME
+          data_type: VARCHAR
+        - name: MEMBER_LAST_NAME
+          description: Member's last name
+          expr: members.LAST_NAME
+          data_type: VARCHAR
+        - name: MEMBER_EMAIL
+          description: Member's email address
+          expr: members.EMAIL
+          data_type: VARCHAR
+        - name: MEMBER_JOIN_DATE
+          description: Date when member joined the credit union
+          expr: members.JOIN_DATE
+          data_type: DATE
+        - name: MEMBER_STATUS
+          description: Current member status (Active, Inactive, Dormant, Closed)
+          expr: members.MEMBER_STATUS
+          data_type: VARCHAR
+        - name: MEMBER_SEGMENT
+          description: Member segment (New, Established, Loyal, Premium)
+          expr: members.MEMBER_SEGMENT
+          data_type: VARCHAR
+        - name: MEMBER_RISK_RATING
+          description: Risk rating of the member (Low, Medium, High)
+          expr: members.RISK_RATING
+          data_type: VARCHAR
+        - name: MEMBER_CITY
+          description: City where member resides
+          expr: members.CITY
+          data_type: VARCHAR
+        - name: MEMBER_STATE
+          description: State where member resides
+          expr: members.STATE
+          data_type: VARCHAR
+        - name: MEMBER_ZIP_CODE
+          description: Member's ZIP code
+          expr: members.ZIP_CODE
+          data_type: VARCHAR
+        - name: EMPLOYMENT_STATUS
+          description: Member's employment status (Employed Full-time, Self-employed, Retired, Part-time)
+          expr: members.EMPLOYMENT_STATUS
+          data_type: VARCHAR
+        - name: MARKETING_CHANNEL
+          description: Channel through which member was acquired (Referral, Online, Branch Walk-in, Social Media, Email Campaign, Direct Mail)
+          expr: members.MARKETING_CHANNEL
+          data_type: VARCHAR
+      facts:
+        - name: ANNUAL_INCOME
+          description: Member's annual income in dollars
+          expr: members.ANNUAL_INCOME
+          data_type: NUMBER
 
--- =====================================================================
--- SEMANTIC VIEW 3: LOAN_PORTFOLIO_VIEW
--- Purpose: Comprehensive loan portfolio analysis with trends
--- Key Questions:
---   - How are auto loan balances trending?
---   - What percentage of total portfolio is each loan type?
---   - What is portfolio health by loan type?
--- =====================================================================
-CREATE OR REPLACE VIEW LOAN_PORTFOLIO_VIEW
-COMMENT = 'Comprehensive loan portfolio metrics and trends'
-AS
-SELECT 
-    -- Loan identifiers
-    L.LOAN_ID,
-    L.LOAN_NUMBER,
-    L.LOAN_TYPE,
-    L.LOAN_STATUS,
-    
-    -- Member information
-    L.MEMBER_ID,
-    M.MEMBER_NUMBER,
-    M.FIRST_NAME || ' ' || M.LAST_NAME AS MEMBER_NAME,
-    M.MEMBER_SEGMENT,
-    M.ANNUAL_INCOME AS MEMBER_INCOME,
-    
-    -- Branch information
-    L.BRANCH_ID,
-    B.BRANCH_NAME,
-    B.BRANCH_CODE,
-    B.REGION AS BRANCH_REGION,
-    
-    -- Loan dates and time dimensions
-    L.ORIGINATION_DATE,
-    YEAR(L.ORIGINATION_DATE) AS ORIGINATION_YEAR,
-    QUARTER(L.ORIGINATION_DATE) AS ORIGINATION_QUARTER,
-    MONTH(L.ORIGINATION_DATE) AS ORIGINATION_MONTH,
-    MONTHNAME(L.ORIGINATION_DATE) AS ORIGINATION_MONTH_NAME,
-    DATE_TRUNC('MONTH', L.ORIGINATION_DATE) AS ORIGINATION_MONTH_START,
-    DATE_TRUNC('QUARTER', L.ORIGINATION_DATE) AS ORIGINATION_QUARTER_START,
-    DATE_TRUNC('YEAR', L.ORIGINATION_DATE) AS ORIGINATION_YEAR_START,
-    
-    -- Time intelligence
-    DATEDIFF(month, L.ORIGINATION_DATE, CURRENT_DATE()) AS MONTHS_SINCE_ORIGINATION,
-    DATEDIFF(year, L.ORIGINATION_DATE, CURRENT_DATE()) AS YEARS_SINCE_ORIGINATION,
-    
-    -- Loan financials
-    L.ORIGINAL_LOAN_AMOUNT,
-    L.CURRENT_BALANCE,
-    L.ORIGINAL_LOAN_AMOUNT - L.CURRENT_BALANCE AS PRINCIPAL_PAID,
-    CASE 
-        WHEN L.ORIGINAL_LOAN_AMOUNT > 0 
-        THEN (L.ORIGINAL_LOAN_AMOUNT - L.CURRENT_BALANCE) / L.ORIGINAL_LOAN_AMOUNT 
-        ELSE 0 
-    END AS PAYDOWN_PERCENTAGE,
-    L.INTEREST_RATE,
-    L.TERM_MONTHS,
-    L.MONTHLY_PAYMENT,
-    
-    -- Credit card specific
-    L.CREDIT_LIMIT,
-    L.AVAILABLE_CREDIT,
-    CASE 
-        WHEN L.CREDIT_LIMIT > 0 
-        THEN L.CURRENT_BALANCE / L.CREDIT_LIMIT 
-        ELSE 0 
-    END AS CREDIT_UTILIZATION,
-    
-    -- Credit quality
-    L.ORIGINATION_CREDIT_SCORE,
-    L.CURRENT_CREDIT_SCORE,
-    L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE AS CREDIT_SCORE_CHANGE,
-    L.DAYS_DELINQUENT,
-    L.LOAN_TO_VALUE_RATIO,
-    L.COLLATERAL_TYPE,
-    
-    -- Payment information
-    L.LAST_PAYMENT_DATE,
-    L.LAST_PAYMENT_AMOUNT,
-    L.NEXT_PAYMENT_DATE,
-    L.CLOSE_DATE,
-    
-    -- Status flags
-    CASE WHEN L.LOAN_STATUS = 'Active' THEN 1 ELSE 0 END AS IS_ACTIVE,
-    CASE WHEN L.LOAN_STATUS = 'Paid Off' THEN 1 ELSE 0 END AS IS_PAID_OFF,
-    CASE WHEN L.LOAN_STATUS = 'Charged Off' THEN 1 ELSE 0 END AS IS_CHARGED_OFF,
-    CASE WHEN L.LOAN_STATUS = 'Delinquent' THEN 1 ELSE 0 END AS IS_DELINQUENT,
-    CASE WHEN L.DAYS_DELINQUENT > 0 THEN 1 ELSE 0 END AS HAS_DELINQUENCY,
-    CASE WHEN L.DAYS_DELINQUENT >= 30 THEN 1 ELSE 0 END AS IS_30_DAYS_LATE,
-    CASE WHEN L.DAYS_DELINQUENT >= 60 THEN 1 ELSE 0 END AS IS_60_DAYS_LATE,
-    CASE WHEN L.DAYS_DELINQUENT >= 90 THEN 1 ELSE 0 END AS IS_90_DAYS_LATE,
-    
-    -- Loan type flags
-    CASE WHEN L.LOAN_TYPE = 'Auto' THEN 1 ELSE 0 END AS IS_AUTO_LOAN,
-    CASE WHEN L.LOAN_TYPE = 'Credit Card' THEN 1 ELSE 0 END AS IS_CREDIT_CARD,
-    CASE WHEN L.LOAN_TYPE = 'Mortgage' THEN 1 ELSE 0 END AS IS_MORTGAGE,
-    CASE WHEN L.LOAN_TYPE = 'Personal' THEN 1 ELSE 0 END AS IS_PERSONAL_LOAN,
-    
-    -- Origination period flags (for cohort analysis)
-    CASE WHEN L.ORIGINATION_DATE >= DATEADD(month, -3, CURRENT_DATE()) THEN 1 ELSE 0 END AS ORIGINATED_LAST_3_MONTHS,
-    CASE WHEN L.ORIGINATION_DATE >= DATEADD(month, -6, CURRENT_DATE()) THEN 1 ELSE 0 END AS ORIGINATED_LAST_6_MONTHS,
-    CASE WHEN L.ORIGINATION_DATE >= DATEADD(month, -12, CURRENT_DATE()) THEN 1 ELSE 0 END AS ORIGINATED_LAST_12_MONTHS,
-    CASE WHEN L.ORIGINATION_DATE >= DATEADD(month, -24, CURRENT_DATE()) THEN 1 ELSE 0 END AS ORIGINATED_LAST_24_MONTHS,
-    
-    -- Credit score bands
-    CASE 
-        WHEN L.ORIGINATION_CREDIT_SCORE >= 800 THEN 'Excellent (800+)'
-        WHEN L.ORIGINATION_CREDIT_SCORE >= 740 THEN 'Very Good (740-799)'
-        WHEN L.ORIGINATION_CREDIT_SCORE >= 670 THEN 'Good (670-739)'
-        WHEN L.ORIGINATION_CREDIT_SCORE >= 580 THEN 'Fair (580-669)'
-        ELSE 'Poor (<580)'
-    END AS ORIGINATION_CREDIT_BAND,
-    
-    CASE 
-        WHEN L.CURRENT_CREDIT_SCORE >= 800 THEN 'Excellent (800+)'
-        WHEN L.CURRENT_CREDIT_SCORE >= 740 THEN 'Very Good (740-799)'
-        WHEN L.CURRENT_CREDIT_SCORE >= 670 THEN 'Good (670-739)'
-        WHEN L.CURRENT_CREDIT_SCORE >= 580 THEN 'Fair (580-669)'
-        ELSE 'Poor (<580)'
-    END AS CURRENT_CREDIT_BAND,
-    
-    -- Credit migration category
-    CASE 
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE >= 50 THEN 'Significant Improvement'
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE >= 20 THEN 'Moderate Improvement'
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE BETWEEN -19 AND 19 THEN 'Stable'
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE BETWEEN -49 AND -20 THEN 'Moderate Decline'
-        ELSE 'Significant Decline'
-    END AS CREDIT_MIGRATION,
-    
-    -- Risk categories
-    CASE 
-        WHEN L.LOAN_STATUS = 'Charged Off' THEN 'High Risk'
-        WHEN L.LOAN_STATUS = 'Delinquent' OR L.DAYS_DELINQUENT >= 30 THEN 'Elevated Risk'
-        WHEN L.CURRENT_CREDIT_SCORE < 620 THEN 'Moderate Risk'
-        ELSE 'Low Risk'
-    END AS RISK_CATEGORY,
-    
-    -- Timestamps
-    L.CREATED_AT,
-    L.UPDATED_AT
-FROM LOANS L
-INNER JOIN MEMBERS M ON L.MEMBER_ID = M.MEMBER_ID
-INNER JOIN BRANCHES B ON L.BRANCH_ID = B.BRANCH_ID;
+    - name: ACCOUNTS
+      description: Deposit accounts including checking, savings, and certificates
+      base_table:
+        database: CREDIT_UNION_DEMO
+        schema: CREDIT_UNION_DATA
+        table: ACCOUNTS
+      primary_key:
+        columns:
+          - ACCOUNT_ID
+      dimensions:
+        - name: ACCOUNT_ID
+          description: Unique identifier for the account
+          expr: accounts.ACCOUNT_ID
+          data_type: VARCHAR
+        - name: ACCOUNT_NUMBER
+          description: Account number
+          expr: accounts.ACCOUNT_NUMBER
+          data_type: VARCHAR
+        - name: ACCOUNT_TYPE
+          description: Type of account (Checking, Savings, Certificate, Money Market)
+          expr: accounts.ACCOUNT_TYPE
+          data_type: VARCHAR
+        - name: ACCOUNT_STATUS
+          description: Status of the account (Active, Dormant, Closed)
+          expr: accounts.ACCOUNT_STATUS
+          data_type: VARCHAR
+        - name: ACCOUNT_OPEN_DATE
+          description: Date when account was opened
+          expr: accounts.OPEN_DATE
+          data_type: DATE
+        - name: ACCOUNT_CLOSE_DATE
+          description: Date when account was closed
+          expr: accounts.CLOSE_DATE
+          data_type: DATE
+        - name: CERTIFICATE_MATURITY_DATE
+          description: Maturity date for certificate accounts
+          expr: accounts.MATURITY_DATE
+          data_type: DATE
+        - name: CERTIFICATE_RENEWAL_STATUS
+          description: Renewal status for certificates (Auto-Renew, Manual-Renew, Pending, Closed)
+          expr: accounts.RENEWAL_STATUS
+          data_type: VARCHAR
+      facts:
+        - name: CURRENT_BALANCE
+          description: Current account balance in dollars
+          expr: accounts.CURRENT_BALANCE
+          data_type: NUMBER
+        - name: AVAILABLE_BALANCE
+          description: Available balance in dollars
+          expr: accounts.AVAILABLE_BALANCE
+          data_type: NUMBER
+        - name: INTEREST_RATE
+          description: Interest rate on the account
+          expr: accounts.INTEREST_RATE
+          data_type: NUMBER
+        - name: CERTIFICATE_TERM_MONTHS
+          description: Term length in months for certificate accounts
+          expr: accounts.CERTIFICATE_TERM_MONTHS
+          data_type: NUMBER
+        - name: ORIGINAL_DEPOSIT_AMOUNT
+          description: Original deposit amount for certificates
+          expr: accounts.ORIGINAL_DEPOSIT_AMOUNT
+          data_type: NUMBER
 
--- =====================================================================
--- SEMANTIC VIEW 4: CREDIT_CARD_HEALTH_VIEW
--- Purpose: Detailed credit card portfolio health analysis
--- Key Questions:
---   - What is credit score migration for credit cards?
---   - What is credit utilization by cohort?
---   - How many charge-offs by origination period?
--- =====================================================================
-CREATE OR REPLACE VIEW CREDIT_CARD_HEALTH_VIEW
-COMMENT = 'Credit card portfolio health metrics with credit score migration analysis'
-AS
-SELECT 
-    -- Loan identifiers
-    L.LOAN_ID,
-    L.LOAN_NUMBER,
-    L.LOAN_STATUS,
-    
-    -- Member information
-    L.MEMBER_ID,
-    M.MEMBER_NUMBER,
-    M.FIRST_NAME || ' ' || M.LAST_NAME AS MEMBER_NAME,
-    M.MEMBER_SEGMENT,
-    M.MEMBER_STATUS,
-    M.ANNUAL_INCOME AS MEMBER_INCOME,
-    
-    -- Branch information
-    L.BRANCH_ID,
-    B.BRANCH_NAME,
-    B.BRANCH_CODE,
-    B.REGION AS BRANCH_REGION,
-    
-    -- Origination details
-    L.ORIGINATION_DATE,
-    YEAR(L.ORIGINATION_DATE) AS ORIGINATION_YEAR,
-    QUARTER(L.ORIGINATION_DATE) AS ORIGINATION_QUARTER,
-    MONTH(L.ORIGINATION_DATE) AS ORIGINATION_MONTH,
-    MONTHNAME(L.ORIGINATION_DATE) AS ORIGINATION_MONTH_NAME,
-    DATE_TRUNC('MONTH', L.ORIGINATION_DATE) AS ORIGINATION_MONTH_START,
-    DATE_TRUNC('QUARTER', L.ORIGINATION_DATE) AS ORIGINATION_QUARTER_START,
-    DATEDIFF(month, L.ORIGINATION_DATE, CURRENT_DATE()) AS MONTHS_ON_BOOK,
-    
-    -- Credit limit and balances
-    L.CREDIT_LIMIT,
-    L.CURRENT_BALANCE,
-    L.AVAILABLE_CREDIT,
-    L.CREDIT_LIMIT - L.CURRENT_BALANCE AS CALCULATED_AVAILABLE_CREDIT,
-    
-    -- Utilization metrics
-    CASE 
-        WHEN L.CREDIT_LIMIT > 0 
-        THEN (L.CURRENT_BALANCE / L.CREDIT_LIMIT) * 100 
-        ELSE 0 
-    END AS UTILIZATION_PERCENTAGE,
-    
-    CASE 
-        WHEN L.CREDIT_LIMIT > 0 AND (L.CURRENT_BALANCE / L.CREDIT_LIMIT) >= 0.90 THEN 'Very High (90%+)'
-        WHEN L.CREDIT_LIMIT > 0 AND (L.CURRENT_BALANCE / L.CREDIT_LIMIT) >= 0.70 THEN 'High (70-89%)'
-        WHEN L.CREDIT_LIMIT > 0 AND (L.CURRENT_BALANCE / L.CREDIT_LIMIT) >= 0.50 THEN 'Moderate (50-69%)'
-        WHEN L.CREDIT_LIMIT > 0 AND (L.CURRENT_BALANCE / L.CREDIT_LIMIT) >= 0.30 THEN 'Low (30-49%)'
-        ELSE 'Very Low (<30%)'
-    END AS UTILIZATION_BAND,
-    
-    -- Credit score tracking
-    L.ORIGINATION_CREDIT_SCORE,
-    L.CURRENT_CREDIT_SCORE,
-    L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE AS CREDIT_SCORE_CHANGE,
-    ABS(L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE) AS CREDIT_SCORE_CHANGE_ABS,
-    
-    -- Credit score bands
-    CASE 
-        WHEN L.ORIGINATION_CREDIT_SCORE >= 800 THEN 'Excellent (800+)'
-        WHEN L.ORIGINATION_CREDIT_SCORE >= 740 THEN 'Very Good (740-799)'
-        WHEN L.ORIGINATION_CREDIT_SCORE >= 670 THEN 'Good (670-739)'
-        WHEN L.ORIGINATION_CREDIT_SCORE >= 580 THEN 'Fair (580-669)'
-        ELSE 'Poor (<580)'
-    END AS ORIGINATION_CREDIT_BAND,
-    
-    CASE 
-        WHEN L.CURRENT_CREDIT_SCORE >= 800 THEN 'Excellent (800+)'
-        WHEN L.CURRENT_CREDIT_SCORE >= 740 THEN 'Very Good (740-799)'
-        WHEN L.CURRENT_CREDIT_SCORE >= 670 THEN 'Good (670-739)'
-        WHEN L.CURRENT_CREDIT_SCORE >= 580 THEN 'Fair (580-669)'
-        ELSE 'Poor (<580)'
-    END AS CURRENT_CREDIT_BAND,
-    
-    -- Credit migration analysis
-    CASE 
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE >= 50 THEN 'Significant Improvement (50+ points)'
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE >= 20 THEN 'Moderate Improvement (20-49 points)'
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE >= 10 THEN 'Slight Improvement (10-19 points)'
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE BETWEEN -9 AND 9 THEN 'Stable (+/-10 points)'
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE BETWEEN -19 AND -10 THEN 'Slight Decline (10-19 points)'
-        WHEN L.CURRENT_CREDIT_SCORE - L.ORIGINATION_CREDIT_SCORE BETWEEN -49 AND -20 THEN 'Moderate Decline (20-49 points)'
-        ELSE 'Significant Decline (50+ points)'
-    END AS CREDIT_MIGRATION_CATEGORY,
-    
-    -- Interest rate and payments
-    L.INTEREST_RATE,
-    L.MONTHLY_PAYMENT,
-    L.LAST_PAYMENT_DATE,
-    L.LAST_PAYMENT_AMOUNT,
-    
-    -- Delinquency tracking
-    L.DAYS_DELINQUENT,
-    CASE 
-        WHEN L.DAYS_DELINQUENT = 0 THEN 'Current'
-        WHEN L.DAYS_DELINQUENT BETWEEN 1 AND 29 THEN '1-29 Days'
-        WHEN L.DAYS_DELINQUENT BETWEEN 30 AND 59 THEN '30-59 Days'
-        WHEN L.DAYS_DELINQUENT BETWEEN 60 AND 89 THEN '60-89 Days'
-        WHEN L.DAYS_DELINQUENT >= 90 THEN '90+ Days'
-        ELSE 'Unknown'
-    END AS DELINQUENCY_BUCKET,
-    
-    -- Status flags
-    CASE WHEN L.LOAN_STATUS = 'Active' THEN 1 ELSE 0 END AS IS_ACTIVE,
-    CASE WHEN L.LOAN_STATUS = 'Inactive' THEN 1 ELSE 0 END AS IS_INACTIVE,
-    CASE WHEN L.LOAN_STATUS = 'Charged Off' THEN 1 ELSE 0 END AS IS_CHARGED_OFF,
-    CASE WHEN L.DAYS_DELINQUENT >= 30 THEN 1 ELSE 0 END AS IS_30_PLUS_DELINQUENT,
-    CASE WHEN L.DAYS_DELINQUENT >= 60 THEN 1 ELSE 0 END AS IS_60_PLUS_DELINQUENT,
-    CASE WHEN L.DAYS_DELINQUENT >= 90 THEN 1 ELSE 0 END AS IS_90_PLUS_DELINQUENT,
-    
-    -- Origination cohorts
-    CASE 
-        WHEN L.ORIGINATION_DATE >= DATEADD(month, -3, CURRENT_DATE()) THEN 'Last 3 Months'
-        WHEN L.ORIGINATION_DATE >= DATEADD(month, -6, CURRENT_DATE()) THEN 'Last 6 Months'
-        WHEN L.ORIGINATION_DATE >= DATEADD(month, -12, CURRENT_DATE()) THEN 'Last 12 Months'
-        WHEN L.ORIGINATION_DATE >= DATEADD(month, -24, CURRENT_DATE()) THEN 'Last 24 Months'
-        ELSE 'Over 24 Months'
-    END AS ORIGINATION_COHORT,
-    
-    -- Risk indicators
-    CASE 
-        WHEN L.LOAN_STATUS = 'Charged Off' THEN 'Critical'
-        WHEN L.DAYS_DELINQUENT >= 90 THEN 'Severe'
-        WHEN L.DAYS_DELINQUENT >= 60 THEN 'High'
-        WHEN L.DAYS_DELINQUENT >= 30 THEN 'Elevated'
-        WHEN L.CREDIT_LIMIT > 0 AND (L.CURRENT_BALANCE / L.CREDIT_LIMIT) >= 0.90 THEN 'Moderate'
-        WHEN L.CURRENT_CREDIT_SCORE < 620 THEN 'Watch'
-        ELSE 'Low'
-    END AS RISK_LEVEL,
-    
-    -- Revenue potential (annual interest revenue)
-    L.CURRENT_BALANCE * L.INTEREST_RATE AS ESTIMATED_ANNUAL_INTEREST_REVENUE,
-    
-    -- Timestamps
-    L.CREATED_AT,
-    L.UPDATED_AT
-FROM LOANS L
-INNER JOIN MEMBERS M ON L.MEMBER_ID = M.MEMBER_ID
-INNER JOIN BRANCHES B ON L.BRANCH_ID = B.BRANCH_ID
-WHERE L.LOAN_TYPE = 'Credit Card';
+    - name: LOANS
+      description: All loan products including auto, credit cards, mortgages, and personal loans
+      base_table:
+        database: CREDIT_UNION_DEMO
+        schema: CREDIT_UNION_DATA
+        table: LOANS
+      primary_key:
+        columns:
+          - LOAN_ID
+      dimensions:
+        - name: LOAN_ID
+          description: Unique identifier for the loan
+          expr: loans.LOAN_ID
+          data_type: VARCHAR
+        - name: LOAN_NUMBER
+          description: Loan account number
+          expr: loans.LOAN_NUMBER
+          data_type: VARCHAR
+        - name: LOAN_TYPE
+          description: Type of loan (Auto, Credit Card, Mortgage, Personal, Home Equity)
+          expr: loans.LOAN_TYPE
+          data_type: VARCHAR
+        - name: LOAN_STATUS
+          description: Current loan status (Active, Paid Off, Charged Off, Delinquent, Suspended, Inactive)
+          expr: loans.LOAN_STATUS
+          data_type: VARCHAR
+        - name: ORIGINATION_DATE
+          description: Date when loan was originated
+          expr: loans.ORIGINATION_DATE
+          data_type: DATE
+        - name: CLOSE_DATE
+          description: Date when loan was closed or paid off
+          expr: loans.CLOSE_DATE
+          data_type: DATE
+        - name: COLLATERAL_TYPE
+          description: Type of collateral for secured loans
+          expr: loans.COLLATERAL_TYPE
+          data_type: VARCHAR
+      facts:
+        - name: ORIGINAL_LOAN_AMOUNT
+          description: Original loan amount in dollars (NULL for credit cards)
+          expr: loans.ORIGINAL_LOAN_AMOUNT
+          data_type: NUMBER
+        - name: CURRENT_BALANCE
+          description: Current outstanding balance in dollars
+          expr: loans.CURRENT_BALANCE
+          data_type: NUMBER
+        - name: INTEREST_RATE
+          description: Annual interest rate on the loan
+          expr: loans.INTEREST_RATE
+          data_type: NUMBER
+        - name: TERM_MONTHS
+          description: Loan term in months
+          expr: loans.TERM_MONTHS
+          data_type: NUMBER
+        - name: MONTHLY_PAYMENT
+          description: Monthly payment amount in dollars
+          expr: loans.MONTHLY_PAYMENT
+          data_type: NUMBER
+        - name: DAYS_DELINQUENT
+          description: Number of days the loan is delinquent
+          expr: loans.DAYS_DELINQUENT
+          data_type: NUMBER
+        - name: CREDIT_LIMIT
+          description: Credit limit for credit card loans
+          expr: loans.CREDIT_LIMIT
+          data_type: NUMBER
+        - name: AVAILABLE_CREDIT
+          description: Available credit for credit card loans
+          expr: loans.AVAILABLE_CREDIT
+          data_type: NUMBER
+        - name: ORIGINATION_CREDIT_SCORE
+          description: Credit score at loan origination
+          expr: loans.ORIGINATION_CREDIT_SCORE
+          data_type: NUMBER
+        - name: CURRENT_CREDIT_SCORE
+          description: Current credit score
+          expr: loans.CURRENT_CREDIT_SCORE
+          data_type: NUMBER
+        - name: LOAN_TO_VALUE_RATIO
+          description: Loan-to-value ratio for secured loans
+          expr: loans.LOAN_TO_VALUE_RATIO
+          data_type: NUMBER
 
--- =====================================================================
--- SEMANTIC VIEW 5: BRANCH_PERFORMANCE_VIEW
--- Purpose: Branch-level performance metrics across all products
--- Key Questions:
---   - Which branches are top performers?
---   - How does Encinitas compare to other branches?
---   - What is product mix by branch?
--- =====================================================================
-CREATE OR REPLACE VIEW BRANCH_PERFORMANCE_VIEW
-COMMENT = 'Branch performance metrics across deposits, loans, and members'
-AS
-SELECT 
-    -- Branch identifiers
-    B.BRANCH_ID,
-    B.BRANCH_NAME,
-    B.BRANCH_CODE,
-    B.CITY AS BRANCH_CITY,
-    B.STATE AS BRANCH_STATE,
-    B.REGION,
-    B.BRANCH_TYPE,
-    B.MANAGER_NAME,
-    B.OPEN_DATE AS BRANCH_OPEN_DATE,
-    DATEDIFF(year, B.OPEN_DATE, CURRENT_DATE()) AS YEARS_OPEN,
-    
-    -- Member metrics
-    (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID) AS TOTAL_MEMBERS,
-    (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID AND MEMBER_STATUS = 'Active') AS ACTIVE_MEMBERS,
-    (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID 
-        AND JOIN_DATE >= DATEADD(month, -12, CURRENT_DATE())) AS NEW_MEMBERS_12_MONTHS,
-    (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID 
-        AND JOIN_DATE >= DATEADD(month, -6, CURRENT_DATE())) AS NEW_MEMBERS_6_MONTHS,
-    (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID 
-        AND JOIN_DATE >= DATEADD(month, -3, CURRENT_DATE())) AS NEW_MEMBERS_3_MONTHS,
-    
-    -- Account metrics
-    (SELECT COUNT(*) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID) AS TOTAL_ACCOUNTS,
-    (SELECT COUNT(*) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID AND ACCOUNT_TYPE = 'Checking') AS CHECKING_ACCOUNTS,
-    (SELECT COUNT(*) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID AND ACCOUNT_TYPE = 'Savings') AS SAVINGS_ACCOUNTS,
-    (SELECT COUNT(*) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID AND ACCOUNT_TYPE = 'Certificate') AS CERTIFICATE_ACCOUNTS,
-    
-    -- Deposit balances
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID) AS TOTAL_DEPOSITS,
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND ACCOUNT_TYPE = 'Checking') AS CHECKING_BALANCE,
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND ACCOUNT_TYPE = 'Savings') AS SAVINGS_BALANCE,
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND ACCOUNT_TYPE = 'Certificate') AS CERTIFICATE_BALANCE,
-    
-    -- Loan metrics
-    (SELECT COUNT(*) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID) AS TOTAL_LOANS,
-    (SELECT COUNT(*) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID AND LOAN_STATUS = 'Active') AS ACTIVE_LOANS,
-    (SELECT COUNT(*) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID AND LOAN_TYPE = 'Auto') AS AUTO_LOANS,
-    (SELECT COUNT(*) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID AND LOAN_TYPE = 'Credit Card') AS CREDIT_CARD_LOANS,
-    (SELECT COUNT(*) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID AND LOAN_TYPE = 'Mortgage') AS MORTGAGE_LOANS,
-    (SELECT COUNT(*) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID AND LOAN_TYPE = 'Personal') AS PERSONAL_LOANS,
-    
-    -- Loan balances
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND LOAN_STATUS = 'Active') AS TOTAL_LOAN_BALANCE,
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND LOAN_TYPE = 'Auto' AND LOAN_STATUS = 'Active') AS AUTO_LOAN_BALANCE,
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND LOAN_TYPE = 'Credit Card' AND LOAN_STATUS = 'Active') AS CREDIT_CARD_BALANCE,
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND LOAN_TYPE = 'Mortgage' AND LOAN_STATUS = 'Active') AS MORTGAGE_BALANCE,
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND LOAN_TYPE = 'Personal' AND LOAN_STATUS = 'Active') AS PERSONAL_LOAN_BALANCE,
-    
-    -- Certificate renewal metrics
-    (SELECT COUNT(*) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND ACCOUNT_TYPE = 'Certificate' 
-        AND MATURITY_DATE BETWEEN CURRENT_DATE() AND DATEADD(day, 30, CURRENT_DATE())) AS CERTIFICATES_MATURING_30_DAYS,
-    (SELECT COUNT(*) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND ACCOUNT_TYPE = 'Certificate' 
-        AND MATURITY_DATE BETWEEN CURRENT_DATE() AND DATEADD(day, 90, CURRENT_DATE())) AS CERTIFICATES_MATURING_90_DAYS,
-    (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND ACCOUNT_TYPE = 'Certificate' 
-        AND MATURITY_DATE BETWEEN CURRENT_DATE() AND DATEADD(day, 90, CURRENT_DATE())) AS VALUE_MATURING_90_DAYS,
-    
-    -- Credit quality
-    (SELECT COUNT(*) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND LOAN_STATUS = 'Charged Off') AS CHARGED_OFF_LOANS,
-    (SELECT COUNT(*) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND DAYS_DELINQUENT >= 30) AS DELINQUENT_LOANS_30_PLUS,
-    (SELECT COALESCE(AVG(CURRENT_CREDIT_SCORE), 0) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID 
-        AND CURRENT_CREDIT_SCORE IS NOT NULL) AS AVG_CREDIT_SCORE,
-    
-    -- Calculated metrics
-    CASE 
-        WHEN (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID) > 0
-        THEN (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM ACCOUNTS WHERE BRANCH_ID = B.BRANCH_ID) / 
-             (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID)
-        ELSE 0
-    END AS AVG_DEPOSIT_PER_MEMBER,
-    
-    CASE 
-        WHEN (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID AND MEMBER_STATUS = 'Active') > 0
-        THEN (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS WHERE BRANCH_ID = B.BRANCH_ID AND LOAN_STATUS = 'Active') / 
-             (SELECT COUNT(*) FROM MEMBERS WHERE PRIMARY_BRANCH_ID = B.BRANCH_ID AND MEMBER_STATUS = 'Active')
-        ELSE 0
-    END AS AVG_LOAN_PER_ACTIVE_MEMBER,
-    
-    -- Timestamps
-    B.CREATED_AT
-FROM BRANCHES B;
+    - name: MARKETING_CAMPAIGNS
+      description: Marketing campaigns for member acquisition and product promotion
+      base_table:
+        database: CREDIT_UNION_DEMO
+        schema: CREDIT_UNION_DATA
+        table: MARKETING_CAMPAIGNS
+      primary_key:
+        columns:
+          - CAMPAIGN_ID
+      dimensions:
+        - name: CAMPAIGN_ID
+          description: Unique identifier for the marketing campaign
+          expr: marketing_campaigns.CAMPAIGN_ID
+          data_type: VARCHAR
+        - name: CAMPAIGN_NAME
+          description: Name of the marketing campaign
+          expr: marketing_campaigns.CAMPAIGN_NAME
+          data_type: VARCHAR
+        - name: CAMPAIGN_TYPE
+          description: Type of campaign (Member Acquisition, Product Promotion, Retention, Cross-sell)
+          expr: marketing_campaigns.CAMPAIGN_TYPE
+          data_type: VARCHAR
+        - name: CAMPAIGN_CHANNEL
+          description: Marketing channel (Email, Social Media, Direct Mail, Online Ads, Branch, Referral)
+          expr: marketing_campaigns.CAMPAIGN_CHANNEL
+          data_type: VARCHAR
+        - name: CAMPAIGN_START_DATE
+          description: Campaign start date
+          expr: marketing_campaigns.START_DATE
+          data_type: DATE
+        - name: CAMPAIGN_END_DATE
+          description: Campaign end date
+          expr: marketing_campaigns.END_DATE
+          data_type: DATE
+        - name: TARGET_AUDIENCE
+          description: Target audience for the campaign
+          expr: marketing_campaigns.TARGET_AUDIENCE
+          data_type: VARCHAR
+        - name: CAMPAIGN_GOAL
+          description: Goal or objective of the campaign
+          expr: marketing_campaigns.CAMPAIGN_GOAL
+          data_type: VARCHAR
+      facts:
+        - name: CAMPAIGN_BUDGET
+          description: Campaign budget in dollars
+          expr: marketing_campaigns.BUDGET
+          data_type: NUMBER
+        - name: CAMPAIGN_ACTUAL_SPEND
+          description: Actual campaign spend in dollars
+          expr: marketing_campaigns.ACTUAL_SPEND
+          data_type: NUMBER
 
--- =====================================================================
--- SEMANTIC VIEW 6: TIME_SERIES_METRICS_VIEW
--- Purpose: Time-based trending for all key metrics
--- Key Questions:
---   - How are loan balances trending over time?
---   - What is month-over-month growth?
---   - What are seasonal patterns?
--- =====================================================================
-CREATE OR REPLACE VIEW TIME_SERIES_METRICS_VIEW
-COMMENT = 'Time series metrics for trending analysis across all products'
-AS
-WITH date_spine AS (
-    -- Generate last 24 months of data
-    SELECT 
-        DATEADD(month, -SEQ4(), DATE_TRUNC('MONTH', CURRENT_DATE())) AS METRIC_MONTH
-    FROM TABLE(GENERATOR(ROWCOUNT => 24))
-),
-monthly_metrics AS (
-    SELECT 
-        DS.METRIC_MONTH,
-        YEAR(DS.METRIC_MONTH) AS METRIC_YEAR,
-        QUARTER(DS.METRIC_MONTH) AS METRIC_QUARTER,
-        MONTH(DS.METRIC_MONTH) AS METRIC_MONTH_NUMBER,
-        MONTHNAME(DS.METRIC_MONTH) AS METRIC_MONTH_NAME,
-        
-        -- Member metrics
-        (SELECT COUNT(*) FROM MEMBERS 
-            WHERE JOIN_DATE <= LAST_DAY(DS.METRIC_MONTH)) AS TOTAL_MEMBERS_EOY,
-        (SELECT COUNT(*) FROM MEMBERS 
-            WHERE DATE_TRUNC('MONTH', JOIN_DATE) = DS.METRIC_MONTH) AS NEW_MEMBERS_MONTH,
-        
-        -- Account metrics
-        (SELECT COUNT(*) FROM ACCOUNTS 
-            WHERE OPEN_DATE <= LAST_DAY(DS.METRIC_MONTH) 
-            AND (CLOSE_DATE IS NULL OR CLOSE_DATE > LAST_DAY(DS.METRIC_MONTH))) AS TOTAL_ACCOUNTS_EOM,
-        
-        -- Loan origination metrics by type
-        (SELECT COUNT(*) FROM LOANS 
-            WHERE DATE_TRUNC('MONTH', ORIGINATION_DATE) = DS.METRIC_MONTH) AS LOANS_ORIGINATED,
-        (SELECT COUNT(*) FROM LOANS 
-            WHERE DATE_TRUNC('MONTH', ORIGINATION_DATE) = DS.METRIC_MONTH 
-            AND LOAN_TYPE = 'Auto') AS AUTO_LOANS_ORIGINATED,
-        (SELECT COUNT(*) FROM LOANS 
-            WHERE DATE_TRUNC('MONTH', ORIGINATION_DATE) = DS.METRIC_MONTH 
-            AND LOAN_TYPE = 'Credit Card') AS CREDIT_CARDS_ORIGINATED,
-        (SELECT COUNT(*) FROM LOANS 
-            WHERE DATE_TRUNC('MONTH', ORIGINATION_DATE) = DS.METRIC_MONTH 
-            AND LOAN_TYPE = 'Mortgage') AS MORTGAGES_ORIGINATED,
-        
-        -- Balance metrics (snapshot at end of month)
-        (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS 
-            WHERE ORIGINATION_DATE <= LAST_DAY(DS.METRIC_MONTH)
-            AND (CLOSE_DATE IS NULL OR CLOSE_DATE > LAST_DAY(DS.METRIC_MONTH))
-            AND LOAN_TYPE = 'Auto') AS AUTO_LOAN_BALANCE_EOM,
-        (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS 
-            WHERE ORIGINATION_DATE <= LAST_DAY(DS.METRIC_MONTH)
-            AND (CLOSE_DATE IS NULL OR CLOSE_DATE > LAST_DAY(DS.METRIC_MONTH))
-            AND LOAN_TYPE = 'Credit Card') AS CREDIT_CARD_BALANCE_EOM,
-        (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS 
-            WHERE ORIGINATION_DATE <= LAST_DAY(DS.METRIC_MONTH)
-            AND (CLOSE_DATE IS NULL OR CLOSE_DATE > LAST_DAY(DS.METRIC_MONTH))
-            AND LOAN_TYPE = 'Mortgage') AS MORTGAGE_BALANCE_EOM,
-        (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS 
-            WHERE ORIGINATION_DATE <= LAST_DAY(DS.METRIC_MONTH)
-            AND (CLOSE_DATE IS NULL OR CLOSE_DATE > LAST_DAY(DS.METRIC_MONTH))
-            AND LOAN_TYPE = 'Personal') AS PERSONAL_LOAN_BALANCE_EOM,
-        (SELECT COALESCE(SUM(CURRENT_BALANCE), 0) FROM LOANS 
-            WHERE ORIGINATION_DATE <= LAST_DAY(DS.METRIC_MONTH)
-            AND (CLOSE_DATE IS NULL OR CLOSE_DATE > LAST_DAY(DS.METRIC_MONTH))) AS TOTAL_LOAN_BALANCE_EOM
-            
-    FROM date_spine DS
-)
-SELECT 
-    METRIC_MONTH,
-    METRIC_YEAR,
-    METRIC_QUARTER,
-    METRIC_MONTH_NUMBER,
-    METRIC_MONTH_NAME,
-    
-    -- Member growth
-    TOTAL_MEMBERS_EOY,
-    NEW_MEMBERS_MONTH,
-    
-    -- Account growth
-    TOTAL_ACCOUNTS_EOM,
-    
-    -- Loan originations
-    LOANS_ORIGINATED,
-    AUTO_LOANS_ORIGINATED,
-    CREDIT_CARDS_ORIGINATED,
-    MORTGAGES_ORIGINATED,
-    
-    -- Loan balances
-    AUTO_LOAN_BALANCE_EOM,
-    CREDIT_CARD_BALANCE_EOM,
-    MORTGAGE_BALANCE_EOM,
-    PERSONAL_LOAN_BALANCE_EOM,
-    TOTAL_LOAN_BALANCE_EOM,
-    
-    -- Portfolio composition percentages
-    CASE 
-        WHEN TOTAL_LOAN_BALANCE_EOM > 0 
-        THEN (AUTO_LOAN_BALANCE_EOM / TOTAL_LOAN_BALANCE_EOM) * 100 
-        ELSE 0 
-    END AS AUTO_LOAN_PCT_OF_PORTFOLIO,
-    
-    CASE 
-        WHEN TOTAL_LOAN_BALANCE_EOM > 0 
-        THEN (CREDIT_CARD_BALANCE_EOM / TOTAL_LOAN_BALANCE_EOM) * 100 
-        ELSE 0 
-    END AS CREDIT_CARD_PCT_OF_PORTFOLIO,
-    
-    CASE 
-        WHEN TOTAL_LOAN_BALANCE_EOM > 0 
-        THEN (MORTGAGE_BALANCE_EOM / TOTAL_LOAN_BALANCE_EOM) * 100 
-        ELSE 0 
-    END AS MORTGAGE_PCT_OF_PORTFOLIO,
-    
-    -- Month-over-month changes
-    AUTO_LOAN_BALANCE_EOM - LAG(AUTO_LOAN_BALANCE_EOM, 1) OVER (ORDER BY METRIC_MONTH) AS AUTO_LOAN_MOM_CHANGE,
-    TOTAL_LOAN_BALANCE_EOM - LAG(TOTAL_LOAN_BALANCE_EOM, 1) OVER (ORDER BY METRIC_MONTH) AS TOTAL_LOAN_MOM_CHANGE,
-    NEW_MEMBERS_MONTH - LAG(NEW_MEMBERS_MONTH, 1) OVER (ORDER BY METRIC_MONTH) AS NEW_MEMBERS_MOM_CHANGE
-    
-FROM monthly_metrics
-ORDER BY METRIC_MONTH DESC;
+    - name: MEMBER_CAMPAIGN_RESPONSES
+      description: Member responses to marketing campaigns
+      base_table:
+        database: CREDIT_UNION_DEMO
+        schema: CREDIT_UNION_DATA
+        table: MEMBER_CAMPAIGN_RESPONSES
+      primary_key:
+        columns:
+          - RESPONSE_ID
+      dimensions:
+        - name: RESPONSE_ID
+          description: Unique identifier for the response
+          expr: member_campaign_responses.RESPONSE_ID
+          data_type: VARCHAR
+        - name: RESPONSE_DATE
+          description: Date of the response
+          expr: member_campaign_responses.RESPONSE_DATE
+          data_type: DATE
+        - name: RESPONSE_TYPE
+          description: Type of response (Click, Open, Application, Conversion, Opt-out)
+          expr: member_campaign_responses.RESPONSE_TYPE
+          data_type: VARCHAR
+        - name: PRODUCT_APPLIED
+          description: Product the member applied for
+          expr: member_campaign_responses.PRODUCT_APPLIED
+          data_type: VARCHAR
+        - name: APPLICATION_APPROVED
+          description: Whether the application was approved
+          expr: member_campaign_responses.APPLICATION_APPROVED
+          data_type: BOOLEAN
+      facts:
+        - name: REVENUE_GENERATED
+          description: Revenue generated from the response in dollars
+          expr: member_campaign_responses.REVENUE_GENERATED
+          data_type: NUMBER
 
--- =====================================================================
--- Verification
--- =====================================================================
+    - name: MEMBER_INTERACTIONS
+      description: Member service interactions and satisfaction tracking
+      base_table:
+        database: CREDIT_UNION_DEMO
+        schema: CREDIT_UNION_DATA
+        table: MEMBER_INTERACTIONS
+      primary_key:
+        columns:
+          - INTERACTION_ID
+      dimensions:
+        - name: INTERACTION_ID
+          description: Unique identifier for the interaction
+          expr: member_interactions.INTERACTION_ID
+          data_type: VARCHAR
+        - name: INTERACTION_DATE
+          description: Date of the interaction
+          expr: member_interactions.INTERACTION_DATE
+          data_type: DATE
+        - name: INTERACTION_TYPE
+          description: Type of interaction (Service Request, Complaint, Inquiry, Feedback, Loan Application)
+          expr: member_interactions.INTERACTION_TYPE
+          data_type: VARCHAR
+        - name: INTERACTION_CHANNEL
+          description: Channel of interaction (Phone, Email, Chat, Branch, Mobile App)
+          expr: member_interactions.INTERACTION_CHANNEL
+          data_type: VARCHAR
+        - name: INTERACTION_TOPIC
+          description: Topic or subject of the interaction
+          expr: member_interactions.INTERACTION_TOPIC
+          data_type: VARCHAR
+        - name: RESOLUTION_STATUS
+          description: Resolution status (Resolved, Pending, Escalated)
+          expr: member_interactions.RESOLUTION_STATUS
+          data_type: VARCHAR
+        - name: FEEDBACK_TEXT
+          description: Text feedback from the member
+          expr: member_interactions.FEEDBACK_TEXT
+          data_type: VARCHAR
+        - name: HANDLED_BY
+          description: Staff member who handled the interaction
+          expr: member_interactions.HANDLED_BY
+          data_type: VARCHAR
+      facts:
+        - name: SATISFACTION_RATING
+          description: Member satisfaction rating (1-5 scale)
+          expr: member_interactions.SATISFACTION_RATING
+          data_type: NUMBER
 
--- Show all created views
-SHOW VIEWS;
+  relationships:
+    - name: MEMBERS_BRANCHES
+      left_table: MEMBERS
+      right_table: BRANCHES
+      relationship_columns:
+        - left_column: PRIMARY_BRANCH_ID
+          right_column: BRANCH_ID
+      relationship_type: many_to_one
+
+    - name: ACCOUNTS_MEMBERS
+      left_table: ACCOUNTS
+      right_table: MEMBERS
+      relationship_columns:
+        - left_column: MEMBER_ID
+          right_column: MEMBER_ID
+      relationship_type: many_to_one
+
+    - name: ACCOUNTS_BRANCHES
+      left_table: ACCOUNTS
+      right_table: BRANCHES
+      relationship_columns:
+        - left_column: BRANCH_ID
+          right_column: BRANCH_ID
+      relationship_type: many_to_one
+
+    - name: LOANS_MEMBERS
+      left_table: LOANS
+      right_table: MEMBERS
+      relationship_columns:
+        - left_column: MEMBER_ID
+          right_column: MEMBER_ID
+      relationship_type: many_to_one
+
+    - name: LOANS_BRANCHES
+      left_table: LOANS
+      right_table: BRANCHES
+      relationship_columns:
+        - left_column: BRANCH_ID
+          right_column: BRANCH_ID
+      relationship_type: many_to_one
+
+    - name: MEMBER_CAMPAIGN_RESPONSES_CAMPAIGNS
+      left_table: MEMBER_CAMPAIGN_RESPONSES
+      right_table: MARKETING_CAMPAIGNS
+      relationship_columns:
+        - left_column: CAMPAIGN_ID
+          right_column: CAMPAIGN_ID
+      relationship_type: many_to_one
+
+    - name: MEMBER_CAMPAIGN_RESPONSES_MEMBERS
+      left_table: MEMBER_CAMPAIGN_RESPONSES
+      right_table: MEMBERS
+      relationship_columns:
+        - left_column: MEMBER_ID
+          right_column: MEMBER_ID
+      relationship_type: many_to_one
+
+    - name: MEMBER_INTERACTIONS_MEMBERS
+      left_table: MEMBER_INTERACTIONS
+      right_table: MEMBERS
+      relationship_columns:
+        - left_column: MEMBER_ID
+          right_column: MEMBER_ID
+      relationship_type: many_to_one
+
+    - name: MEMBER_INTERACTIONS_BRANCHES
+      left_table: MEMBER_INTERACTIONS
+      right_table: BRANCHES
+      relationship_columns:
+        - left_column: BRANCH_ID
+          right_column: BRANCH_ID
+      relationship_type: many_to_one
+
+  metrics:
+    # Member Acquisition Metrics
+    - name: TOTAL_MEMBERS
+      description: Total number of members
+      expr: COUNT(DISTINCT members.MEMBER_ID)
+      
+    - name: NEW_MEMBERS_LAST_30_DAYS
+      description: Number of members who joined in the last 30 days
+      expr: COUNT(DISTINCT CASE WHEN DATEDIFF(day, members.JOIN_DATE, CURRENT_DATE()) <= 30 THEN members.MEMBER_ID END)
+      
+    - name: NEW_MEMBERS_LAST_90_DAYS
+      description: Number of members who joined in the last 90 days
+      expr: COUNT(DISTINCT CASE WHEN DATEDIFF(day, members.JOIN_DATE, CURRENT_DATE()) <= 90 THEN members.MEMBER_ID END)
+      
+    - name: NEW_MEMBERS_LAST_12_MONTHS
+      description: Number of members who joined in the last 12 months
+      expr: COUNT(DISTINCT CASE WHEN DATEDIFF(month, members.JOIN_DATE, CURRENT_DATE()) <= 12 THEN members.MEMBER_ID END)
+      
+    - name: ACTIVE_MEMBERS
+      description: Number of active members
+      expr: COUNT(DISTINCT CASE WHEN members.MEMBER_STATUS = 'Active' THEN members.MEMBER_ID END)
+      
+    # Certificate Renewal Metrics
+    - name: TOTAL_CERTIFICATES
+      description: Total number of certificate accounts
+      expr: COUNT(DISTINCT CASE WHEN accounts.ACCOUNT_TYPE = 'Certificate' THEN accounts.ACCOUNT_ID END)
+      
+    - name: CERTIFICATES_MATURING_30_DAYS
+      description: Number of certificates maturing in the next 30 days
+      expr: COUNT(DISTINCT CASE WHEN accounts.ACCOUNT_TYPE = 'Certificate' AND DATEDIFF(day, CURRENT_DATE(), accounts.MATURITY_DATE) BETWEEN 0 AND 30 THEN accounts.ACCOUNT_ID END)
+      
+    - name: CERTIFICATES_MATURING_90_DAYS
+      description: Number of certificates maturing in the next 90 days
+      expr: COUNT(DISTINCT CASE WHEN accounts.ACCOUNT_TYPE = 'Certificate' AND DATEDIFF(day, CURRENT_DATE(), accounts.MATURITY_DATE) BETWEEN 0 AND 90 THEN accounts.ACCOUNT_ID END)
+      
+    - name: CERTIFICATES_MATURING_180_DAYS
+      description: Number of certificates maturing in the next 180 days
+      expr: COUNT(DISTINCT CASE WHEN accounts.ACCOUNT_TYPE = 'Certificate' AND DATEDIFF(day, CURRENT_DATE(), accounts.MATURITY_DATE) BETWEEN 0 AND 180 THEN accounts.ACCOUNT_ID END)
+      
+    - name: CERTIFICATE_VALUE_MATURING_90_DAYS
+      description: Total value of certificates maturing in next 90 days
+      expr: SUM(CASE WHEN accounts.ACCOUNT_TYPE = 'Certificate' AND DATEDIFF(day, CURRENT_DATE(), accounts.MATURITY_DATE) BETWEEN 0 AND 90 THEN accounts.CURRENT_BALANCE ELSE 0 END)
+      
+    # Deposit Metrics
+    - name: TOTAL_DEPOSITS
+      description: Total deposit balances across all accounts
+      expr: SUM(accounts.CURRENT_BALANCE)
+      
+    - name: TOTAL_CHECKING_BALANCE
+      description: Total balance in checking accounts
+      expr: SUM(CASE WHEN accounts.ACCOUNT_TYPE = 'Checking' THEN accounts.CURRENT_BALANCE ELSE 0 END)
+      
+    - name: TOTAL_SAVINGS_BALANCE
+      description: Total balance in savings accounts
+      expr: SUM(CASE WHEN accounts.ACCOUNT_TYPE = 'Savings' THEN accounts.CURRENT_BALANCE ELSE 0 END)
+      
+    - name: TOTAL_CERTIFICATE_BALANCE
+      description: Total balance in certificate accounts
+      expr: SUM(CASE WHEN accounts.ACCOUNT_TYPE = 'Certificate' THEN accounts.CURRENT_BALANCE ELSE 0 END)
+      
+    # Loan Portfolio Metrics
+    - name: TOTAL_LOANS
+      description: Total number of loans
+      expr: COUNT(DISTINCT loans.LOAN_ID)
+      
+    - name: ACTIVE_LOANS
+      description: Number of active loans
+      expr: COUNT(DISTINCT CASE WHEN loans.LOAN_STATUS = 'Active' THEN loans.LOAN_ID END)
+      
+    - name: TOTAL_LOAN_BALANCE
+      description: Total outstanding loan balance
+      expr: SUM(CASE WHEN loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END)
+      
+    - name: AUTO_LOAN_BALANCE
+      description: Total auto loan portfolio balance
+      expr: SUM(CASE WHEN loans.LOAN_TYPE = 'Auto' AND loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END)
+      
+    - name: AUTO_LOAN_COUNT
+      description: Number of active auto loans
+      expr: COUNT(DISTINCT CASE WHEN loans.LOAN_TYPE = 'Auto' AND loans.LOAN_STATUS = 'Active' THEN loans.LOAN_ID END)
+      
+    - name: CREDIT_CARD_BALANCE
+      description: Total credit card portfolio balance
+      expr: SUM(CASE WHEN loans.LOAN_TYPE = 'Credit Card' AND loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END)
+      
+    - name: CREDIT_CARD_COUNT
+      description: Number of active credit cards
+      expr: COUNT(DISTINCT CASE WHEN loans.LOAN_TYPE = 'Credit Card' AND loans.LOAN_STATUS = 'Active' THEN loans.LOAN_ID END)
+      
+    - name: MORTGAGE_BALANCE
+      description: Total mortgage portfolio balance
+      expr: SUM(CASE WHEN loans.LOAN_TYPE = 'Mortgage' AND loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END)
+      
+    - name: PERSONAL_LOAN_BALANCE
+      description: Total personal loan portfolio balance
+      expr: SUM(CASE WHEN loans.LOAN_TYPE = 'Personal' AND loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END)
+      
+    - name: AUTO_LOAN_PCT_OF_PORTFOLIO
+      description: Auto loans as percentage of total loan portfolio
+      expr: ROUND((SUM(CASE WHEN loans.LOAN_TYPE = 'Auto' AND loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END) * 100.0 / NULLIF(SUM(CASE WHEN loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE END), 0)), 2)
+      
+    # Credit Card Health Metrics
+    - name: AVG_CREDIT_UTILIZATION
+      description: Average credit card utilization percentage
+      expr: AVG(CASE WHEN loans.LOAN_TYPE = 'Credit Card' AND loans.CREDIT_LIMIT > 0 THEN (loans.CURRENT_BALANCE / loans.CREDIT_LIMIT) * 100 END)
+      
+    - name: HIGH_UTILIZATION_CARDS
+      description: Number of credit cards with utilization above 70%
+      expr: COUNT(DISTINCT CASE WHEN loans.LOAN_TYPE = 'Credit Card' AND loans.CREDIT_LIMIT > 0 AND (loans.CURRENT_BALANCE / loans.CREDIT_LIMIT) >= 0.70 THEN loans.LOAN_ID END)
+      
+    - name: AVG_CREDIT_SCORE_CHANGE
+      description: Average change in credit score from origination to current
+      expr: AVG(CASE WHEN loans.LOAN_TYPE = 'Credit Card' THEN loans.CURRENT_CREDIT_SCORE - loans.ORIGINATION_CREDIT_SCORE END)
+      
+    - name: IMPROVING_CREDIT_SCORES
+      description: Number of credit cards with improving credit scores
+      expr: COUNT(DISTINCT CASE WHEN loans.LOAN_TYPE = 'Credit Card' AND loans.CURRENT_CREDIT_SCORE > loans.ORIGINATION_CREDIT_SCORE THEN loans.LOAN_ID END)
+      
+    - name: DECLINING_CREDIT_SCORES
+      description: Number of credit cards with declining credit scores
+      expr: COUNT(DISTINCT CASE WHEN loans.LOAN_TYPE = 'Credit Card' AND loans.CURRENT_CREDIT_SCORE < loans.ORIGINATION_CREDIT_SCORE THEN loans.LOAN_ID END)
+      
+    - name: CHARGED_OFF_LOANS
+      description: Number of charged off loans
+      expr: COUNT(DISTINCT CASE WHEN loans.LOAN_STATUS = 'Charged Off' THEN loans.LOAN_ID END)
+      
+    - name: CHARGED_OFF_CREDIT_CARDS
+      description: Number of charged off credit cards
+      expr: COUNT(DISTINCT CASE WHEN loans.LOAN_TYPE = 'Credit Card' AND loans.LOAN_STATUS = 'Charged Off' THEN loans.LOAN_ID END)
+      
+    # Delinquency Metrics
+    - name: DELINQUENT_LOANS_30_PLUS
+      description: Number of loans 30+ days delinquent
+      expr: COUNT(DISTINCT CASE WHEN loans.DAYS_DELINQUENT >= 30 THEN loans.LOAN_ID END)
+      
+    - name: DELINQUENT_LOANS_60_PLUS
+      description: Number of loans 60+ days delinquent
+      expr: COUNT(DISTINCT CASE WHEN loans.DAYS_DELINQUENT >= 60 THEN loans.LOAN_ID END)
+      
+    - name: DELINQUENT_LOANS_90_PLUS
+      description: Number of loans 90+ days delinquent
+      expr: COUNT(DISTINCT CASE WHEN loans.DAYS_DELINQUENT >= 90 THEN loans.LOAN_ID END)
+      
+    - name: DELINQUENCY_RATE
+      description: Percentage of active loans that are delinquent
+      expr: ROUND((COUNT(DISTINCT CASE WHEN loans.LOAN_STATUS = 'Active' AND loans.DAYS_DELINQUENT >= 30 THEN loans.LOAN_ID END) * 100.0 / NULLIF(COUNT(DISTINCT CASE WHEN loans.LOAN_STATUS = 'Active' THEN loans.LOAN_ID END), 0)), 2)
+      
+    # Marketing Metrics
+    - name: TOTAL_MARKETING_SPEND
+      description: Total marketing campaign spend
+      expr: SUM(marketing_campaigns.ACTUAL_SPEND)
+      
+    - name: TOTAL_MARKETING_BUDGET
+      description: Total marketing campaign budget
+      expr: SUM(marketing_campaigns.BUDGET)
+      
+    - name: CAMPAIGN_REVENUE
+      description: Total revenue generated from campaigns
+      expr: SUM(member_campaign_responses.REVENUE_GENERATED)
+      
+    - name: ROAS
+      description: Return on ad spend (Revenue / Spend)
+      expr: ROUND(SUM(member_campaign_responses.REVENUE_GENERATED) / NULLIF(SUM(marketing_campaigns.ACTUAL_SPEND), 0), 2)
+      
+    - name: CAMPAIGN_CONVERSION_RATE
+      description: Percentage of campaign responses that converted
+      expr: ROUND((COUNT(CASE WHEN member_campaign_responses.RESPONSE_TYPE = 'Conversion' THEN 1 END) * 100.0 / NULLIF(COUNT(member_campaign_responses.RESPONSE_ID), 0)), 2)
+      
+    - name: CAMPAIGN_APPLICATION_RATE
+      description: Percentage of responses that resulted in applications
+      expr: ROUND((COUNT(CASE WHEN member_campaign_responses.RESPONSE_TYPE IN ('Application', 'Conversion') THEN 1 END) * 100.0 / NULLIF(COUNT(member_campaign_responses.RESPONSE_ID), 0)), 2)
+      
+    # Member Satisfaction Metrics
+    - name: AVG_SATISFACTION_RATING
+      description: Average member satisfaction rating
+      expr: AVG(member_interactions.SATISFACTION_RATING)
+      
+    - name: TOTAL_INTERACTIONS
+      description: Total number of member interactions
+      expr: COUNT(member_interactions.INTERACTION_ID)
+      
+    - name: COMPLAINTS
+      description: Number of complaints
+      expr: COUNT(CASE WHEN member_interactions.INTERACTION_TYPE = 'Complaint' THEN 1 END)
+      
+    - name: RESOLVED_INTERACTIONS
+      description: Number of resolved interactions
+      expr: COUNT(CASE WHEN member_interactions.RESOLUTION_STATUS = 'Resolved' THEN 1 END)
+      
+    - name: RESOLUTION_RATE
+      description: Percentage of interactions that are resolved
+      expr: ROUND((COUNT(CASE WHEN member_interactions.RESOLUTION_STATUS = 'Resolved' THEN 1 END) * 100.0 / NULLIF(COUNT(member_interactions.INTERACTION_ID), 0)), 2)
+      
+    # Branch Performance Metrics
+    - name: AVG_DEPOSIT_PER_MEMBER
+      description: Average deposit balance per member
+      expr: SUM(accounts.CURRENT_BALANCE) / NULLIF(COUNT(DISTINCT members.MEMBER_ID), 0)
+      
+    - name: AVG_LOAN_PER_MEMBER
+      description: Average loan balance per member
+      expr: SUM(CASE WHEN loans.LOAN_STATUS = 'Active' THEN loans.CURRENT_BALANCE ELSE 0 END) / NULLIF(COUNT(DISTINCT members.MEMBER_ID), 0)
+      
+    - name: PRODUCTS_PER_MEMBER
+      description: Average number of products per member
+      expr: (COUNT(DISTINCT accounts.ACCOUNT_ID) + COUNT(DISTINCT loans.LOAN_ID)) / NULLIF(COUNT(DISTINCT members.MEMBER_ID), 0)
+  $$
+);
+
+-- Verify the semantic model was created successfully
+SHOW SEMANTIC MODELS;
+
+-- Grant usage permissions (adjust as needed for your environment)
+-- GRANT USAGE ON SEMANTIC MODEL CREDIT_UNION_ANALYTICS TO ROLE PUBLIC;
 
 SELECT 'Semantic model creation completed successfully!' AS STATUS;
-
--- Display sample row counts from each view
-SELECT 'MEMBER_ACQUISITION_VIEW' AS VIEW_NAME, COUNT(*) AS ROW_COUNT FROM MEMBER_ACQUISITION_VIEW
-UNION ALL
-SELECT 'CERTIFICATE_RENEWAL_VIEW', COUNT(*) FROM CERTIFICATE_RENEWAL_VIEW
-UNION ALL
-SELECT 'LOAN_PORTFOLIO_VIEW', COUNT(*) FROM LOAN_PORTFOLIO_VIEW
-UNION ALL
-SELECT 'CREDIT_CARD_HEALTH_VIEW', COUNT(*) FROM CREDIT_CARD_HEALTH_VIEW
-UNION ALL
-SELECT 'BRANCH_PERFORMANCE_VIEW', COUNT(*) FROM BRANCH_PERFORMANCE_VIEW
-UNION ALL
-SELECT 'TIME_SERIES_METRICS_VIEW', COUNT(*) FROM TIME_SERIES_METRICS_VIEW
-ORDER BY VIEW_NAME;
-
